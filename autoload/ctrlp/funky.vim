@@ -69,21 +69,27 @@ endfunction
 " TODO: some functions should be defined under ctrlp#funky#utils namespace
 function! s:syntax(filetype)
   if !ctrlp#nosy()
-    call ctrlp#hicheck('CtrlPTabExtra', 'Comment')
-    syn match CtrlPTabExtra '\t#.*:\d\+:\d\+$'
-
     for [k,v] in items(s:custom_hl_list)
       call ctrlp#hicheck(k, v.to_group)
       execute printf('syn match %s "%s"', k, v.pat)
     endfor
 
-    if s:syntax_highlight | let &filetype = a:filetype | endif
+    if !s:is_all_buffers && s:syntax_highlight
+      let &filetype = a:filetype
+    endif
+
+    call ctrlp#hicheck('CtrlPTabExtra', 'Comment')
+    syn match CtrlPTabExtra '\t#.*:\d\+:\d\+$'
   endif
 endfunction
 
 function! s:error(msg)
     echohl ErrorMsg | echomsg a:msg | echohl NONE
     let v:errmsg  = a:msg
+endfunction
+
+function! s:load_buffer(bufnr)
+  if !bufloaded(a:bufnr) | execute 'buffer ' . bufname(a:bufnr) | endif
 endfunction
 
 function! s:filetype(bufnr)
@@ -164,23 +170,37 @@ function! ctrlp#funky#init(bufnr)
     let ctrlp_winnr = bufwinnr(bufnr(''))
     execute bufwinnr(a:bufnr) . 'wincmd w'
     let pos = getpos('.')
-    let filetype = s:filetype(a:bufnr)
+
+    let bufs = []
+    if s:is_all_buffers
+      for bn in ctrlp#buffers()
+        call add(bufs, bufnr(bn))
+      endfor
+    else
+      let bufs = [a:bufnr]
+    endif
 
     let candidates = []
-    for ft in split(filetype, '\.')
-      if s:has_filter(ft)
-        let filters = s:filters_by_filetype(ft, a:bufnr)
-        let st = reltime()
-        let candidates += ctrlp#funky#extract(a:bufnr, filters)
-        call s:fu.debug('Extract: ' . reltimestr(reltime(st)))
-        if s:has_post_extract_hook(ft)
-          call ctrlp#funky#ft#{ft}#post_extract_hook(candidates)
+    for bufnr in bufs
+      call s:load_buffer(bufnr)
+      let filetype = s:filetype(bufnr)
+      for ft in split(filetype, '\.')
+        if s:has_filter(ft)
+          let filters = s:filters_by_filetype(ft, bufnr)
+          let st = reltime()
+          let candidates += ctrlp#funky#extract(bufnr, filters)
+          call s:fu.debug('Extract: ' . reltimestr(reltime(st)))
+          if s:has_post_extract_hook(ft)
+            call ctrlp#funky#ft#{ft}#post_extract_hook(candidates)
+          endif
+        elseif s:report_filter_error
+          echoerr printf('%s: filters not exist', ft)
         endif
-      elseif s:report_filter_error
-        echoerr printf('%s: filters not exist', ft)
-      endif
+      endfor
     endfor
 
+    " activate the former buffer
+    execute 'buffer ' . bufname(a:bufnr)
     call setpos('.', pos)
 
     execute ctrlp_winnr . 'wincmd w'
@@ -236,6 +256,10 @@ function! ctrlp#funky#extract(bufnr, patterns)
       endif
       return ca
     endif
+
+    "
+    " no cache mode is from here
+    "
 
     execute bufwinnr(a:bufnr) . 'wincmd w'
 
@@ -352,10 +376,13 @@ endfunction
 ""
 " Configuration
 "
+let g:ctrlp#funky#is_debug = get(g:, 'ctrlp_funky_debug', 0)
+
 let s:errmsg = ''
 let s:custom_hl_list = {}
 
-let g:ctrlp#funky#is_debug = get(g:, 'ctrlp_funky_debug', 0)
+let s:is_all_buffers = get(g:, 'ctrlp_funky_all_buffers', 0)
+
 let s:report_filter_error = get(g:, 'ctrlp_funky_report_filter_error', 0)
 let s:sort_by_mru = get(g:, 'ctrlp_funky_sort_by_mru', 0)
 " after jump action
